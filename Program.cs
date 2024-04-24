@@ -6,19 +6,26 @@ namespace CustomActionBlock.App;
 
 public class ActionBlock<T> : IDisposable
 {
+    private readonly int _maxParallel;
     private readonly Channel<T> _queue;
     private readonly Task _consumer;
 
     public ActionBlock(Func<T, Task> action, int maxParallel = 1)
     {
+        _maxParallel = maxParallel;
         _queue = Channel.CreateUnbounded<T>();
-        _consumer = Task.Run(async () =>
+        _consumer = Task.Run(Consume(action));
+    }
+
+    private Func<Task?> Consume(Func<T, Task> action)
+    {
+        return async () =>
         {
             var buffer = new Queue<T>();
             await foreach (var item in _queue.Reader.ReadAllAsync())
             {
                 buffer.Enqueue(item);
-                if (buffer.Count == maxParallel)
+                if (buffer.Count == _maxParallel)
                 {
                     var parallelItems = buffer.ToArray();
                     buffer.Clear();
@@ -26,7 +33,7 @@ public class ActionBlock<T> : IDisposable
                     await Task.WhenAll(parallelTasks);
                 }
             }
-        });
+        };
     }
 
     public async Task PostAsync(T item, CancellationToken cancellationToken = default)
